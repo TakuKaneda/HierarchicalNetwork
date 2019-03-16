@@ -22,5 +22,7 @@ Here we present the description of methods for managing uncertainty.
 Implementation is done for one branch of the medium voltage network.
 I would recommend to set the number of samples, `NSamples`, greater than 500 in order to get 'plausible' data.
 
+test write.
+
 ### Scenario-Based Robust MPC with Nested Dantzig-Wolfe <a name="sbrmpcDW"></a>
 [`test/run_dantzig_wolfe.jl`](`test/run_dantzig_wolfe.jl`) implements the SBR-MPC with the nested DW to solve the problem. Again, we consider on one branch of the medium voltage network.
