@@ -1,4 +1,4 @@
-using JuMP, Gurobi, Clp, Statistics
+using JuMP, Clp, Statistics
 struct MyProblem
     m
     pflow
@@ -70,8 +70,8 @@ function PerfectForesightCreation()
     create a struct of perfect foresight policy problem
     "
     ## Build model
-    m = Model(with_optimizer(Gurobi.Optimizer, LogToConsole=0));
-    # m = Model(with_optimizer(Clp.Optimizer, LogLevel=1));
+    # m = Model(with_optimizer(Gurobi.Optimizer, LogToConsole=0));
+    m = Model(with_optimizer(Clp.Optimizer, LogLevel=1));
 
     ## Variables
     @variable(m, pflow[l = 1:NLayers,sn =1:NSubnetworks[l],i=1:NLayerLines[l],1:H]);

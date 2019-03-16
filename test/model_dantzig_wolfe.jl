@@ -1,6 +1,6 @@
 ## model for nested Dantzig Wolfe algorithm
 ## there are generators at the root node
-using JuMP, Gurobi, Clp
+using JuMP, Clp
 
 ImplementedSolution = Array{Any}(undef, NLayers,NSubnetworks[NLayers],H)  # solutions actually implemented
 TemporalSolutionSet = Array{Any}(undef, NLayers,NSubnetworks[NLayers],K+1)  # solution for the Algorithm
