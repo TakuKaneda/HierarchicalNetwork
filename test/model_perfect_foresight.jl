@@ -1,4 +1,6 @@
 using JuMP, Clp, Statistics
+# using Gurobi
+
 struct MyProblem
     m
     pflow

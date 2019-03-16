@@ -25,6 +25,11 @@ SBROnlineTime = zeros(NSamples,H);
 for i = 1:NSamples
     SBRTotalCost[i,:], SBRTotalStorage[i,:], SBROnlineTime[i,:] = ImplementMPC(SBRMPCSubproblem,RealScenario[:,i],FutureStepSize,KnowCurrentOutcome,i)
 end
+## assign the early stage costs for 2:NSamples
+for i = 2:NSamples
+     TimeStages = 1:findall(NOutcomes.!=1)[1]-1;
+     SBRTotalCost[i,TimeStages] = SBRTotalCost[1,TimeStages] ;
+end
 ## data save in JLD2 format
 save("trial_solution/N"* string(NSamples) * "_FS"*string(FutureStepSize) *"_nestedSBRDW_result.jld2","SBRTotalCost",SBRTotalCost,
     "SBRTotalStorage",SBRTotalStorage,"SBROnlineTime",SBROnlineTime,
@@ -32,12 +37,12 @@ save("trial_solution/N"* string(NSamples) * "_FS"*string(FutureStepSize) *"_nest
     "KnowCurrentOutcome",KnowCurrentOutcome);
 ####################################################################
 ####################################################################
-# implement perfect foresight
+## implement perfect foresight
 include("model_perfect_foresight.jl")
-
+@time PFProblem = PerfectForesightCreation()
 PFTotalCost = zeros(NSamples);
 
-## algorithm implementation
+# algorithm implementation
 for i = 1:NSamples
     # fix balance_RHS to the Net demand values
     start_t = time();
@@ -52,6 +57,5 @@ for i = 1:NSamples
     println("   solve time: ", SolveTime[i])
     PFTotalCost[i] = objective_value(PFProblem.m);
 end
-@time PFProblem = PerfectForesightCreation()
 save("trial_solution/N"* string(NSamples) *"_PF_result.jld2","PFTotalCost",PFTotalCost,
     "NSamples",NSamples,"RealScenario",RealScenario);

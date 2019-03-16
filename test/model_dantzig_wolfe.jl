@@ -1,6 +1,7 @@
 ## model for nested Dantzig Wolfe algorithm
 ## there are generators at the root node
 using JuMP, Clp
+# using Gurobi
 
 ImplementedSolution = Array{Any}(undef, NLayers,NSubnetworks[NLayers],H)  # solutions actually implemented
 TemporalSolutionSet = Array{Any}(undef, NLayers,NSubnetworks[NLayers],K+1)  # solution for the Algorithm
@@ -424,7 +425,11 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
     TotalCost = zeros(H);
     TotalStorage = zeros(H);
     OnlineTime = zeros(H);
-    for t in T
+    TimeStages = T;
+    # if sampleID > 1
+    #      TimeStages =findall(NOutcomes.!=1)[1]:H;
+    # end
+    for t in TimeStages
         # Phase 1: implement nested DW with MPC scenarios
         println("Sample $sampleID Stage $t : Phase 1 - Implement nested DW")
         if !KnowCurrentOutcome
