@@ -55,13 +55,27 @@ LVNonBatteryNodes = setdiff(LVDemandNodes, LVBatteryNodes) # node wihtout PV and
 LVNonDemandNodes = setdiff(1:LVNNodes, collect(keys(LVDemandDataDict)))
 NGenerators = length(generator_capacity_rate);
 
+# whole network
+DemandDataDict = [Dict(),LVDemandDataDict];
+PVNodeDict = [Dict(), LVPVNodeDict];
 NSubnetworks = [1, MVNNodes-1];
 NLayerNodes = [MVNNodes, LVNNodes];
 NLayerLines = [MVNLines, LVNLines];
+LayerChildrenNodes = [MVChildrenNodes, LVChildrenNodes];
+LayerDemandNodes = [Int64[],LVDemandNodes];
+LayerNonDemandNodes = [collect(1:MVNNodes),LVNonDemandNodes];
+LayerBatteryNodes = [Int64[], LVBatteryNodes];
+LayerNonBatteryNodes = [collect(1:MVNNodes), setdiff(1:LVNNodes,LVBatteryNodes)];
+LayerPVNodes = [Int64[], LVPVNodes];
+LayerNonPVNodes = [collect(1:MVNNodes), setdiff(1:LVNNodes,LVPVNodes)];
 ## Other parameters
 PGenerationMax = generator_capacity_rate .* feeder_capacity
 PGenerationMin = zeros(NGenerators);
 VOLL = 5.0;
 H = size(NormPV,1);
 T = 1:H;
-SLimit = 10000;
+# set the flow limit to the max of generator capacity to the max capacity
+# devided by the number of subnetworks. By doing this, we donot get any infeasible
+# solutoin in the algorithm (But the flow limint does not affect the final result)
+SLimit = [10000, sum(PGenerationMax)/NSubnetworks[2]];
+# SLimit = 10000;

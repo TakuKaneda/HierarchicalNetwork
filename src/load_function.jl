@@ -226,3 +226,40 @@ function SamplePath(TransProb, NSamples=1)
         return sample_path
     end
 end
+
+function MPCScenarioGeneration(t,FutureStepSize,KnowCurrentOutcome,RealScenario,NScenarios)
+    "generate scenarios for MPC implementation
+    args    - t: current time step
+            - FutureStepSize: step size of looking a head
+            - KnowCurrentOutcome: true or false, if true the outcome of the
+                                current stage will be the real outcome.
+            - RealScenario: real outcome path
+            - NScenarios: num of scenario to generate
+    output  - MPCScenarios: Array{Int64,2}: (FutureStepSize+1,NSamples) outcomes
+    "
+    if t + FutureStepSize <= H
+        MPCScenarios = zeros(Int64, FutureStepSize+1, NScenarios)
+    else
+        MPCScenarios = zeros(Int64, H - t + 1, NScenarios)
+    end
+    # if we DO NOT KNOW the current outcome
+    if !KnowCurrentOutcome
+        if t > 1
+            [MPCScenarios[1,i] = sample(1:length(TransProb[t-1][RealScenario[t-1],:]),
+                StatsBase.Weights(TransProb[t-1][RealScenario[t-1],:])) for i =1:NScenarios];
+        else
+            MPCScenarios[1,:] .= 1;
+        end
+    else # if we KNOW the current outcome
+        MPCScenarios[1,:] .= RealScenario[t]
+    end
+
+    # future outcomes by sampling with transition probability
+    if FutureStepSize > 0
+        for i = 1:NScenarios, tt = 2:size(MPCScenarios,1)
+            MPCScenarios[tt,i] = sample(1:length(TransProb[t+tt-2][MPCScenarios[tt-1,i],:]),
+                    StatsBase.Weights(TransProb[t+tt-2][MPCScenarios[tt-1,i],:]))
+        end
+    end
+    return MPCScenarios
+end

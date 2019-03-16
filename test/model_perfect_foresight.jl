@@ -109,10 +109,10 @@ function PerfectForesightCreation()
 
     # Flow Limits
     @constraint(m, FlowMax[l = 1:NLayers,sn =1:NSubnetworks[l],i=1:NLayerLines[l],t = 1:H],
-        (pflow[l,sn,i,t] <= SLimit)
+        (pflow[l,sn,i,t] <= SLimit[l])
     );
     @constraint(m, FlowMin[l = 1:NLayers,sn =1:NSubnetworks[l],i=1:NLayerLines[l],t = 1:H],
-        ( - pflow[l,sn,i,t] <= SLimit)
+        ( - pflow[l,sn,i,t] <= SLimit[l])
     );
 
     # Storage Capacity
@@ -313,10 +313,10 @@ function PerfectForesight(RealPath, solutions, idx=NaN)
 
     # Flow Limits
     @constraint(m, FlowMax[l = 1:NLayers,sn =1:NSubnetworks[l],i=1:NLayerLines[l],t = 1:H],
-        (pflow[l,sn,i,t] <= SLimit)
+        (pflow[l,sn,i,t] <= SLimit[l])
     );
     @constraint(m, FlowMin[l = 1:NLayers,sn =1:NSubnetworks[l],i=1:NLayerLines[l],t = 1:H],
-        ( - pflow[l,sn,i,t] <= SLimit)
+        ( - pflow[l,sn,i,t] <= SLimit[l])
     );
 
     # Storage Capacity

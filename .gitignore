@@ -4,3 +4,4 @@
 deps/deps.jl
 draft.jl
 *.csv
+trial_solution/
