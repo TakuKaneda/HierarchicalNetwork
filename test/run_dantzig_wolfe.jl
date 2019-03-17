@@ -4,8 +4,8 @@ include("../src/load_data.jl");
 ##################### Algorithm Hyperparameter #####################
 NScenarios = 5;  # number of scenarios for SBR MPC with nested DW
 K = 10; # max num of iteration for the Algorithm
-FutureStepSize = 0; # size of looking a head
-KnowCurrentOutcome = false; # wheather knowing the current outcome or not
+FutureStepSize = 1; # size of looking a head
+KnowCurrentOutcome = true; # wheather knowing the current outcome or not
 ####################################################################
 # model load
 include("model_dantzig_wolfe.jl");
@@ -31,7 +31,7 @@ for i = 2:NSamples
      SBRTotalCost[i,TimeStages] = SBRTotalCost[1,TimeStages] ;
 end
 ## data save in JLD2 format
-save("trial/N"* string(NSamples) * "_FS"*string(FutureStepSize) *"_nestedSBRDW_result.jld2","SBRTotalCost",SBRTotalCost,
+save("trial/N"* string(NSamples) * "_FS"*string(FutureStepSize)*"_"*string(KnowCurrentOutcome)*"_nestedSBRDW_result.jld2","SBRTotalCost",SBRTotalCost,
     "SBRTotalStorage",SBRTotalStorage,"SBROnlineTime",SBROnlineTime,
     "NSamples",NSamples,"RealScenario",RealScenario,"FutureStepSize",FutureStepSize,
     "KnowCurrentOutcome",KnowCurrentOutcome);
