@@ -426,9 +426,9 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
     TotalStorage = zeros(H);
     OnlineTime = zeros(H);
     TimeStages = T;
-    # if sampleID > 1
-    #      TimeStages =findall(NOutcomes.!=1)[1]:H;
-    # end
+    if sampleID > 1
+        TimeStages =findall(NOutcomes.!=1)[1]:H;
+    end
     for t in TimeStages
         # Phase 1: implement nested DW with MPC scenarios
         println("Sample $sampleID Stage $t : Phase 1 - Implement nested DW")

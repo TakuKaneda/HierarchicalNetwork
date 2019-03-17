@@ -1,4 +1,4 @@
-using JuMP, Clp, Statistics
+using JuMP, Clp,GLPK,Ipopt, Statistics, Cbc
 # using Gurobi
 
 struct MyProblem
@@ -73,8 +73,10 @@ function PerfectForesightCreation()
     "
     ## Build model
     # m = Model(with_optimizer(Gurobi.Optimizer, LogToConsole=0));
-    m = Model(with_optimizer(Clp.Optimizer, LogLevel=1));
-
+    # m = Model(with_optimizer(Clp.Optimizer, LogLevel=1));
+    # m = Model(with_optimizer(GLPK.Optimizer, msg_lev=0));
+    # m = Model(with_optimizer(Ipopt.Optimizer, print_level=0));
+    m = Model(with_optimizer(Cbc.Optimizer, loglevel=0));
     ## Variables
     @variable(m, pflow[l = 1:NLayers,sn =1:NSubnetworks[l],i=1:NLayerLines[l],1:H]);
     @variable(m, pgeneration[1:NGenerators,1:H]);

@@ -1,5 +1,5 @@
 NSamples = 500;
-NProcessors = 4;
+NProcessors = 3;
 using Distributed
 addprocs(NProcessors)  # add processors
 
