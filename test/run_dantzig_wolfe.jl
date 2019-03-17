@@ -14,7 +14,7 @@ include("model_dantzig_wolfe.jl");
 PGenerationMax = generator_capacity_rate .* feeder_capacity/NBranches; # scale the generator capacity
 
 ##################### Experiment Parameter #########################
-NSamples = 100; # numeber of samples to test the Alogrithms
+NSamples = 50; # numeber of samples to test the Alogrithms
 RealScenario = SamplePath(TransProb,NSamples); # Generate real scenarios
 ####################################################################
 
@@ -35,27 +35,3 @@ save("trial/N"* string(NSamples) * "_FS"*string(FutureStepSize)*"_"*string(KnowC
     "SBRTotalStorage",SBRTotalStorage,"SBROnlineTime",SBROnlineTime,
     "NSamples",NSamples,"RealScenario",RealScenario,"FutureStepSize",FutureStepSize,
     "KnowCurrentOutcome",KnowCurrentOutcome);
-####################################################################
-####################################################################
-## implement perfect foresight
-# include("model_perfect_foresight.jl")
-# @time PFProblem = PerfectForesightCreation()
-# PFTotalCost = zeros(NSamples);
-
-# algorithm implementation
-#for i = 1:NSamples
-#    # fix balance_RHS to the Net demand values
-#    start_t = time();
-#    for sn=1:NSubnetworks[2], n = LVBatteryNodes, t = 1:H
-#        fix(PFProblem.balance_RHS[sn,n,t],  LVDemandDataDict[n][t] - (LVPVNodeDict[n] * NormPV[t][RealScenario[t,i]]));
-#    end
-#    # AssignTime[i] = time()-start_t;
-#    println("solve sample $i")
-#    start_t = time();
-#    optimize!(PFProblem.m)
-#    SolveTime[i] =  time()-start_t;
-#    println("   solve time: ", SolveTime[i])
-#    PFTotalCost[i] = objective_value(PFProblem.m);
-#end
-#save("trial_solution/N"* string(NSamples) *"_PF_result.jld2","PFTotalCost",PFTotalCost,
-#    "NSamples",NSamples,"RealScenario",RealScenario);
