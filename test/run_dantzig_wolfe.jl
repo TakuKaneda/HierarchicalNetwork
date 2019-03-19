@@ -2,9 +2,9 @@
 include("../src/load_data.jl");
 
 ##################### Algorithm Hyperparameter #####################
-NScenarios = 5;  # number of scenarios for SBR MPC with nested DW
+NScenarios = 4;  # number of scenarios for SBR MPC with nested DW
 K = 10; # max num of iteration for the Algorithm
-FutureStepSize = 1; # size of looking a head
+# FutureStepSize = 0; # size of looking a head
 KnowCurrentOutcome = true; # wheather knowing the current outcome or not
 ####################################################################
 # model load
@@ -14,24 +14,30 @@ include("model_dantzig_wolfe.jl");
 PGenerationMax = generator_capacity_rate .* feeder_capacity/NBranches; # scale the generator capacity
 
 ##################### Experiment Parameter #########################
-NSamples = 50; # numeber of samples to test the Alogrithms
+NSamples = 2; # numeber of samples to test the Alogrithms
 RealScenario = SamplePath(TransProb,NSamples); # Generate real scenarios
 ####################################################################
 
 ## Implementation
-SBRTotalCost = zeros(NSamples,H);
-SBRTotalStorage = zeros(NSamples,H);
-SBROnlineTime = zeros(NSamples,H);
-for i = 1:NSamples
-    SBRTotalCost[i,:], SBRTotalStorage[i,:], SBROnlineTime[i,:] = ImplementMPC(SBRMPCSubproblem,RealScenario[:,i],FutureStepSize,KnowCurrentOutcome,i)
+for FutureStepSize = 0:1
+    SBRSolutions = Array{Any}(undef,NSamples);
+    for i = 1:NSamples
+        SBRSolutions[i] = ImplementMPC(SBRMPCSubproblem,RealScenario[:,i],FutureStepSize,KnowCurrentOutcome,i)
+    end
+    ## assign the early stage values for 2:NSamples
+    if NSamples > 1
+        for i = 2:NSamples
+             TimeStages = 1:findall(NOutcomes.!=1)[1]-1;
+             SBRSolutions[i].TotalCost[TimeStages] = SBRSolutions[1].TotalCost[TimeStages] ;
+             SBRSolutions[i].TotalProduction[TimeStages] = SBRSolutions[1].TotalProduction[TimeStages] ;
+             SBRSolutions[i].TotalStorage[TimeStages] = SBRSolutions[1].TotalStorage[TimeStages] ;
+             SBRSolutions[i].TotalLoadShedding[TimeStages] = SBRSolutions[1].TotalLoadShedding[TimeStages] ;
+             SBRSolutions[i].OnlineTime[TimeStages] = SBRSolutions[1].OnlineTime[TimeStages] ;
+        end
+    end
+    ## data save in JLD2 format
+    save("trial/N"* string(NSamples) * "_FS"*string(FutureStepSize)*"_"*string(KnowCurrentOutcome)*"_SBRnestedDW_result.jld2",
+        "SBRSolutions",SBRSolutions,
+        "NSamples",NSamples,"RealScenario",RealScenario,"FutureStepSize",FutureStepSize,
+        "KnowCurrentOutcome",KnowCurrentOutcome);
 end
-## assign the early stage costs for 2:NSamples
-for i = 2:NSamples
-     TimeStages = 1:findall(NOutcomes.!=1)[1]-1;
-     SBRTotalCost[i,TimeStages] = SBRTotalCost[1,TimeStages] ;
-end
-## data save in JLD2 format
-save("trial/N"* string(NSamples) * "_FS"*string(FutureStepSize)*"_"*string(KnowCurrentOutcome)*"_nestedSBRDW_result.jld2","SBRTotalCost",SBRTotalCost,
-    "SBRTotalStorage",SBRTotalStorage,"SBROnlineTime",SBROnlineTime,
-    "NSamples",NSamples,"RealScenario",RealScenario,"FutureStepSize",FutureStepSize,
-    "KnowCurrentOutcome",KnowCurrentOutcome);

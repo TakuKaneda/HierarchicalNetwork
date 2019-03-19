@@ -103,7 +103,16 @@ mutable struct SBRMPCProblemStruct
     FixInterfaceFlow
     FixLambda
 end
-
+##
+mutable struct MPCResultStruct
+    "struct to store the result of one-day MPC implementation"
+    TotalCost
+    TotalProduction
+    TotalStorage
+    TotalLoadShedding
+    OnlineTime
+    ImplementedSolution
+end
 ## definition of subproblems for Dantzig Wolfe
 function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_pi = zeros(H), LastIteration=false, Last_p_in = Any, Last_lambda = Any)
     """
@@ -176,14 +185,19 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
 
     ## constraints
     # For the cost upper bound
+    VOLP = 1e-4; # cost for productionshedding (but not include in the actual cost)
     if CLayer == 1
         @constraint(m, CostBound[s = 1:MPCScenarioSize],
             (1/4*(sum(MargCost[g] * pgeneration[g,t,s] for g = 1:NGenerators, t = TimeChoice:TimeEnd)
-            + sum(VOLL * loadshedding[n,t,s] for n = 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd)) <= costupperbound)
+            + sum(VOLL * loadshedding[n,t,s] for n = 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd))
+            + sum(VOLP * productionshedding[n,t,s] for n = 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd)
+            <= costupperbound)
         )
     else
         @constraint(m, CostBound[s = 1:MPCScenarioSize],
-            (1/4*sum(VOLL * loadshedding[n,t,s] for n = 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd) <= costupperbound)
+            (1/4*sum(VOLL * loadshedding[n,t,s] for n = 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd)
+            + sum(VOLP * productionshedding[n,t,s] for n = 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd)
+             <= costupperbound)
         )
     end
     # For the first iteration (initial solution)
@@ -196,9 +210,9 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
         @constraint(m, FixLoadShedding_NonDemand[n in LayerNonDemandNodes[CLayer], t = TimeChoice:TimeEnd, s=1:MPCScenarioSize],
             loadshedding[n,t,s] == 0.0
         )
-        @constraint(m, FixProductionShedding_PV[n in LayerPVNodes[CLayer], t = TimeChoice:TimeEnd, s=1:MPCScenarioSize],
-            productionshedding[n,t,s] == PVNodeDict[CLayer][n] * NormPV[t][MPCScenarios[t-TimeChoice+1,s]]
-        )
+        # @constraint(m, FixProductionShedding_PV[n in LayerPVNodes[CLayer], t = TimeChoice:TimeEnd, s=1:MPCScenarioSize],
+        #     productionshedding[n,t,s] == PVNodeDict[CLayer][n] * NormPV[t][MPCScenarios[t-TimeChoice+1,s]]
+        # )
         if CLayer > 1
             @constraint(m, FixPin2zero[t = TimeChoice:TimeEnd], p_in[t] == 0.0)
         end
@@ -373,12 +387,14 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
 
     # store solution
     sol = MPCSolutionStruct()
-    sol.ObjectiveValue = objective_value(m)
+    # compute the max prod shedding to extract from the objective value
+    max_productionshedding = maximum([sum(value.(productionshedding[n,t,s]) for n in 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd)  for  s in 1:MPCScenarioSize])
+    sol.ObjectiveValue = objective_value(m) - VOLP * max_productionshedding
     sol.SubnetworkCost = 1/4 * sum(VOLL * value.(loadshedding[n,TimeChoice,1]) for n = 1:NLayerNodes[CLayer])
     if CLayer == 1
         sol.SubnetworkCost += 1/4 * sum(MargCost[g] * value.(pgeneration[g,TimeChoice,1]) for g = 1:NGenerators)
     end
-    sol.CostForUpperLayer = value.(costupperbound)
+    sol.CostForUpperLayer = value.(costupperbound)  - VOLP * max_productionshedding
     if CLayer < NLayers
         sol.CostForUpperLayer += sum(value.(lambda)[j] * TemporalSolutionSet[CLayer+1,sn,j].CostForUpperLayer for sn in ChildrenNetworks, j in 1:Iteration)
     end
@@ -424,6 +440,9 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
     LowerBound = [[] for t in T]
     TotalCost = zeros(H);
     TotalStorage = zeros(H);
+    TotalPS = zeros(H);
+    TotalLS = zeros(H);
+    TotalProduction = zeros(H);
     OnlineTime = zeros(H);
     TimeStages = T;
     if sampleID > 1
@@ -514,8 +533,11 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
         # println("\nObjecive of Master (Whole Network): ",TemporalSolutionSet[1,1,LastIteration].ObjectiveValue)
         # println("   Cost at (1,1): ",round(TemporalSolutionSet[1,1,LastIteration].SubnetworkCost,digits=5))
         ImplementedSolution[1,1,t] = TemporalSolutionSet[1,1,LastIteration]
-        TotalCost[t] = TemporalSolutionSet[1,1,LastIteration].SubnetworkCost
-        TotalStorage[t] = sum(TemporalSolutionSet[1,1,LastIteration].storage)
+        TotalCost[t] = ImplementedSolution[1,1,t].SubnetworkCost
+        TotalStorage[t] = sum(ImplementedSolution[1,1,t].storage)
+        TotalPS[t] = sum(ImplementedSolution[1,1,t].productionshedding)
+        TotalLS[t] = sum(ImplementedSolution[1,1,t].loadshedding)
+        TotalProduction[t] = sum(ImplementedSolution[1,1,t].pgeneration)
         # Layer 2 to NLayers
         for l = 2:NLayers
             for sn = 1:NSubnetworks[l]
@@ -546,17 +568,22 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
                 # println("    Storage at ($l,$sn) : ", round(sum(ImplementedSolution[l,sn,t].storage)))
                 TotalStorage[t] += sum(ImplementedSolution[l,sn,t].storage)
                 TotalCost[t] += ImplementedSolution[l,sn,t].SubnetworkCost
+                TotalPS[t] += sum(ImplementedSolution[l,sn,t].productionshedding)
+                TotalLS[t] += sum(ImplementedSolution[l,sn,t].loadshedding)
            end
         end
         OnlineTime[t] = time() - s_time
         println("Total cost over the network (\$): ",round(TotalCost[t],digits=5))
-        println("Total storage over the network (\$): ",round(TotalStorage[t],digits=5))
+        println("Total production over the network (kW): ",round(TotalProduction[t],digits=5))
+        println("Total storage over the network (kWh): ",round(TotalStorage[t],digits=5))
+        println("Total load shedding over the network (kW): ",round(TotalLS[t],digits=5))
+        println("Total production shedding over the network (kW): ",round(TotalPS[t],digits=5))
         println("Computation time (s): ",round(OnlineTime[t],digits=2))
         println("===============================")
     end
     # println("Total cost: ",round(sum(TotalCost)),", at each stage: ", TotalCost)
     # println("===============================\n\n")
-    return TotalCost, TotalStorage, OnlineTime
+    return MPCResultStruct(TotalCost,TotalProduction,TotalStorage,TotalLS,OnlineTime,ImplementedSolution) #TotalCost, TotalProduction, TotalStorage, OnlineTime
 end
 
 # function SAMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_pi = zeros(T), LastIteration=false, Last_p_in = Any, Last_lambda = Any)
