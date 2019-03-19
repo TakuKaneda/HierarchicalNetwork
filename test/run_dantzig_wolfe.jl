@@ -14,7 +14,7 @@ include("model_dantzig_wolfe.jl");
 PGenerationMax = generator_capacity_rate .* feeder_capacity/NBranches; # scale the generator capacity
 
 ##################### Experiment Parameter #########################
-NSamples = 2; # numeber of samples to test the Alogrithms
+NSamples = 50; # numeber of samples to test the Alogrithms
 RealScenario = SamplePath(TransProb,NSamples); # Generate real scenarios
 ####################################################################
 
