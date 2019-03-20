@@ -3,7 +3,8 @@
 using JuMP, Clp
 # using Gurobi
 
-ImplementedSolution = Array{Any}(undef, NLayers,NSubnetworks[NLayers],H)  # solutions actually implemented
+ImplementedSolution = Array{Any}(undef, NSamples);
+[ImplementedSolution[i] = Array{Any}(undef, NLayers,NSubnetworks[NLayers],H) for i = 1:NSamples] # solutions actually implemented
 TemporalSolutionSet = Array{Any}(undef, NLayers,NSubnetworks[NLayers],K+1)  # solution for the Algorithm
 
 mutable struct MPCSolutionStruct
@@ -111,16 +112,19 @@ mutable struct MPCResultStruct
     TotalStorage
     TotalLoadShedding
     OnlineTime
+    IterationCount
     ImplementedSolution
 end
 ## definition of subproblems for Dantzig Wolfe
-function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_pi = zeros(H), LastIteration=false, Last_p_in = Any, Last_lambda = Any)
+function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, sampleID,
+            dual_pi = zeros(H), LastIteration=false, Last_p_in = Any, Last_lambda = Any)
     """
     solve a subproblem at (l,sn) with inputs of the upper layer
     args    - NetworkID: ID of Subproblem [layerID, subnetID]
             - MPCScenarios[t,s]: outcome at stage t of scenario s
             - TimeChoice
             - Iteration: iteration upto now
+            - sampleID: id of the sample
             - dual_pi: dual variable of coupling constraint from the upper layer master
             - LastIteration: wheather the iteration is the last one or not
             - Last_p_in: if we are at the last iteration, Last_p_in will be the suggestion from the upper layer
@@ -210,9 +214,6 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
         @constraint(m, FixLoadShedding_NonDemand[n in LayerNonDemandNodes[CLayer], t = TimeChoice:TimeEnd, s=1:MPCScenarioSize],
             loadshedding[n,t,s] == 0.0
         )
-        # @constraint(m, FixProductionShedding_PV[n in LayerPVNodes[CLayer], t = TimeChoice:TimeEnd, s=1:MPCScenarioSize],
-        #     productionshedding[n,t,s] == PVNodeDict[CLayer][n] * NormPV[t][MPCScenarios[t-TimeChoice+1,s]]
-        # )
         if CLayer > 1
             @constraint(m, FixPin2zero[t = TimeChoice:TimeEnd], p_in[t] == 0.0)
         end
@@ -279,11 +280,11 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
                 == storage[n,t-1,s])
             );
         end
-    elseif TimeChoice < H
+    else
         @constraint(m, BatteryDynamics_CurrentStage[n in LayerBatteryNodes[CLayer], s=1:MPCScenarioSize],
             (storage[n,TimeChoice,s] - BatteryChargeEfficiency * batterycharge[n,TimeChoice,s]  / 4 # 15min
             + batterydischarge[n,TimeChoice,s]/BatteryDischargeEfficiency  / 4 # 15min
-            == ImplementedSolution[CLayer,CSubnet,TimeChoice-1].storage[n] )
+            == ImplementedSolution[sampleID][CLayer,CSubnet,TimeChoice-1].storage[n] )
         );
         if TimeEnd - TimeChoice > 0
             @constraint(m, BatteryDynamics[n in LayerBatteryNodes[CLayer], t=TimeChoice+1:TimeEnd, s=1:MPCScenarioSize],
@@ -292,12 +293,6 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
                 == storage[n,t-1,s])
             );
         end
-    else # TimeChoice == H
-        @constraint(m, BatteryDynamics_CurrentStage[n in LayerBatteryNodes[CLayer], s=1:MPCScenarioSize],
-            (storage[n,TimeChoice,s] - BatteryChargeEfficiency * batterycharge[n,TimeChoice,s]  / 4 # 15min
-            + batterydischarge[n,TimeChoice,s]/BatteryDischargeEfficiency / 4 # 15min
-            == ImplementedSolution[CLayer,CSubnet,TimeChoice-1].storage[n])
-        );
     end
     # Flow Limits
     @constraint(m, FlowMax[i = 1:NLayerLines[CLayer],t = TimeChoice:TimeEnd, s=1:MPCScenarioSize], SLimit[CLayer] >= pflow[i,t,s])
@@ -360,27 +355,6 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
             @constraint(m, FixLambda, lambda .== Last_lambda )
         end
     end
-    # if TimeChoice > 1 #&& LastIteration
-    #     # print(m);
-    # end
-
-    # If you want to store the problem struct
-    # if TimeChoice == 1
-    #     if CLayer == 1
-    #     elseif CLayer == NLayers
-    #     else
-    #     end
-    # elseif TimeChoice == H
-    #     if CLayer == 1
-    #     elseif CLayer == NLayers
-    #     else
-    #     end
-    # else # 1<TimeChoice<H
-    #     if CLayer == 1
-    #     elseif CLayer == NLayers
-    #     else
-    #     end
-    # end
 
     # Solve the problem
     optimize!(m);
@@ -390,11 +364,12 @@ function SBRMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_p
     # compute the max prod shedding to extract from the objective value
     max_productionshedding = maximum([sum(value.(productionshedding[n,t,s]) for n in 1:NLayerNodes[CLayer], t = TimeChoice:TimeEnd)  for  s in 1:MPCScenarioSize])
     sol.ObjectiveValue = objective_value(m) - VOLP * max_productionshedding
+    # SubnetworkCost is the cost of the current stage
     sol.SubnetworkCost = 1/4 * sum(VOLL * value.(loadshedding[n,TimeChoice,1]) for n = 1:NLayerNodes[CLayer])
     if CLayer == 1
         sol.SubnetworkCost += 1/4 * sum(MargCost[g] * value.(pgeneration[g,TimeChoice,1]) for g = 1:NGenerators)
     end
-    sol.CostForUpperLayer = value.(costupperbound)  - VOLP * max_productionshedding
+    sol.CostForUpperLayer = value.(costupperbound) - VOLP * max_productionshedding
     if CLayer < NLayers
         sol.CostForUpperLayer += sum(value.(lambda)[j] * TemporalSolutionSet[CLayer+1,sn,j].CostForUpperLayer for sn in ChildrenNetworks, j in 1:Iteration)
     end
@@ -440,13 +415,22 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
     LowerBound = [[] for t in T]
     TotalCost = zeros(H);
     TotalStorage = zeros(H);
-    TotalPS = zeros(H);
-    TotalLS = zeros(H);
+    TotalProductionShedding = zeros(H);
+    TotalLoadShedding = zeros(H);
     TotalProduction = zeros(H);
     OnlineTime = zeros(H);
+    IterationCount = zeros(H);
     TimeStages = T;
-    if sampleID > 1
-        TimeStages =findall(NOutcomes.!=1)[1]:H;
+    if sampleID > 1  # the early stage give the same results -> skip
+        tt = findall(NOutcomes.!=1)[1] - FutureStepSize
+        if tt > 1
+            TimeStages = tt:H;
+            early_stages = 1:tt-1
+            # assign solutions
+            for t in early_stages, l = 1:NLayers, sn = 1:NSubnetworks[l]
+                ImplementedSolution[sampleID][l,sn,t] = ImplementedSolution[1][l,sn,t]
+            end
+        end
     end
     for t in TimeStages
         # Phase 1: implement nested DW with MPC scenarios
@@ -469,9 +453,8 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
                 # solve the subproblems from the bottom
                 for l = NLayers:-1:1
                     for sn = 1:NSubnetworks[l]
-                        # println("Stage $t, PROBLEM ($l,$sn) Outcome ",RealScenario[l,sn,t]," : initial iteration")
-                        # println(" MPC Scenario: ",MPCScenarios[l,sn,:,:]')
-                        TemporalSolutionSet[l,sn,k] = MPCType([l,sn],MPCScenarios,t,k)
+                        # println("Stage $t, sample $sampleID : initial iteration")
+                        TemporalSolutionSet[l,sn,k] = MPCType([l,sn],MPCScenarios,t,k,sampleID)
                         # println("=======================================\n")
                     end
                 end
@@ -485,17 +468,12 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
                         up_i = Int64((sn-1) % NSubnetworks[l] + 1) # branch id of the ancesotr which connects to the current node n
                         Ancestor = (l-1,up_n)
                         interface_price = TemporalSolutionSet[l-1,up_n,k-1].Coupling[up_i,:]
-                        # println("Stage $t, PROBLEM ($l,$sn) Outcome ",RealScenario[t]," : iteration $iter, price: ", collect(interface_price),", Ancestor $Ancestor-$up_i")
-                        # println(" MPC Scenario: ",MPCScenarios[l,sn,:,:]')
-                        TemporalSolutionSet[l,sn,k] = MPCType([l,sn],MPCScenarios,t,k, interface_price)
-                        # println("=======================================\n")
+                        # println("Stage $t, sample $sampleID : iteration $iter")
+                        TemporalSolutionSet[l,sn,k] = MPCType([l,sn],MPCScenarios,t,k,sampleID, interface_price)
                     end
                 end
                 # for the root node (master)
-                # println("Stage $t, PROBLEM (1,1) Outcome ",RealScenario[1,1,t]," : iteration $iter")
-                # println(" MPC Scenario: ",MPCScenarios[1,1,:,:]')
-                TemporalSolutionSet[1,1,k] = MPCType([1,1],MPCScenarios,t,k);
-                # println("=======================================\n")
+                TemporalSolutionSet[1,1,k] = MPCType([1,1],MPCScenarios,t,k,sampleID);
                 # compute the reduced cost for the master
                 rc = sum(TemporalSolutionSet[2,i,k].ObjectiveValue for i=1:NSubnetworks[2]) - TemporalSolutionSet[1,1,k].LambdaSum
                 ReducedCost[t] = push!(ReducedCost[t],rc)
@@ -511,7 +489,7 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
                 end
             end
         end
-        println("Stage $t : Algorithm finished!!!!!")
+        println("Stage $t : Phase 1 - Algorithm finished!!!!!")
         # println("   Number of Iteratoin: $iter")
 
 
@@ -524,66 +502,63 @@ function ImplementMPC(MPCType, RealScenario, FutureStepSize = 0, KnowCurrentOutc
             println("Stage $t : current outcome observed: ", RealScenario[t])
         end
         println("Stage $t : start solve with fixed interface flow and lambda")
-        LastIteration = iter + 1
-        bestlambda = zeros(LastIteration,NLayers-1,NSubnetworks[NLayers])
+        LastIteration = iter + 1;
+        IterationCount[t] = LastIteration;
+        bestlambda = zeros(LastIteration,NLayers-1,NSubnetworks[NLayers-1])
         final_p_in = zeros(NLayers,NSubnetworks[NLayers], size(MPCScenarios,1))
         bestlambda[:,1,1] = TemporalSolutionSet[1,1,LastIteration].lambda
 
         # Layer 1
         # println("\nObjecive of Master (Whole Network): ",TemporalSolutionSet[1,1,LastIteration].ObjectiveValue)
         # println("   Cost at (1,1): ",round(TemporalSolutionSet[1,1,LastIteration].SubnetworkCost,digits=5))
-        ImplementedSolution[1,1,t] = TemporalSolutionSet[1,1,LastIteration]
-        TotalCost[t] = ImplementedSolution[1,1,t].SubnetworkCost
-        TotalStorage[t] = sum(ImplementedSolution[1,1,t].storage)
-        TotalPS[t] = sum(ImplementedSolution[1,1,t].productionshedding)
-        TotalLS[t] = sum(ImplementedSolution[1,1,t].loadshedding)
-        TotalProduction[t] = sum(ImplementedSolution[1,1,t].pgeneration)
+        ImplementedSolution[sampleID][1,1,t] = TemporalSolutionSet[1,1,LastIteration]
+        TotalCost[t] = ImplementedSolution[sampleID][1,1,t].SubnetworkCost
+        TotalStorage[t] = sum(ImplementedSolution[sampleID][1,1,t].storage)
+        TotalProductionShedding[t] = sum(ImplementedSolution[sampleID][1,1,t].productionshedding)
+        TotalLoadShedding[t] = sum(ImplementedSolution[sampleID][1,1,t].loadshedding)
+        TotalProduction[t] = sum(ImplementedSolution[sampleID][1,1,t].pgeneration)
         # Layer 2 to NLayers
         for l = 2:NLayers
             for sn = 1:NSubnetworks[l]
                 up_n = ceil(Int64, sn/NSubnetworks[l]) # node id of the ancestor
                 up_i = Int64((sn-1) % NSubnetworks[l] + 1) # branch id of the ancesotr which connects to the current node n
-                # interface_price = TemporalSolutionSet[l-1,up_n,k-1].Coupling[up_i,:]
-                # up_n = ceil(Int64, sn/NBranches) # node id of the ancestor
-                # up_i = Int64((sn-1) % NBranches + 1) # branch id of the ancesotr which connects to the current node n
                 interface_price = TemporalSolutionSet[l-1,up_n,LastIteration].Coupling[up_i,:]
-                # [final_p_in[l,sn,u-t+1] = sum(bestlambda[k,l-1,up_n] .* TemporalSolutionSet[l,sn,k].p_in[u] for k=1:LastIteration) for u=t:T]
-                ## I did want to compute the p_in from the best lambda and temporal p_in but
-                ## it didnt work so changed it to the corresponding p_out
-                final_p_in[l,sn,:] = ImplementedSolution[l-1,up_n,t].p_out[up_i,:]
+                final_p_in[l,sn,:] = ImplementedSolution[sampleID][l-1,up_n,t].p_out[up_i,:]
                 # println("---final p_in at ($l,$sn): ",final_p_in[l,sn,:], " with price: ",interface_price)
                 if l < NLayers
-                   for k=1:LastIteration
+                    for k=1:LastIteration
                        bestlambda[k,l,sn] = sum(TemporalSolutionSet[l,sn,q].lambda[k] .* bestlambda[q,l-1,up_n] for q = k:LastIteration)
-                   end
-                   ImplementedSolution[l,sn,t] = MPCType([l,sn],RealScenario[t:t+size(MPCScenarios,1)-1],t,LastIteration,interface_price,
-                                        true, final_p_in[l,sn,:], bestlambda[:,l,sn])
-                   # ImplementedSolution[l,sn,t] = MPCType([l,sn],MPCScenarios,t,LastIteration,interface_price,
-                   #                      true, final_p_in[l,sn,:], bestlambda[:,l,sn])
+                    end
+                    # ImplementedSolution[sampleID][l,sn,t] = MPCType([l,sn],MPCScenarios,t,LastIteration,sampleID,interface_price,
+                    #                      true, final_p_in[l,sn,:], bestlambda[:,l,sn])
+                    ImplementedSolution[sampleID][l,sn,t] = MPCType([l,sn],RealScenario[t:t],t,LastIteration,sampleID,interface_price,
+                                        true,final_p_in[l,sn,:])
                 else
-                    ImplementedSolution[l,sn,t] = MPCType([l,sn],RealScenario[t:t+size(MPCScenarios,1)-1],t,LastIteration,interface_price,true,final_p_in[l,sn,:])
-                   # ImplementedSolution[l,sn,t] = MPCType([l,sn],MPCScenarios,t,LastIteration,interface_price,true,final_p_in[l,sn,:])
+                    # ImplementedSolution[sampleID][l,sn,t] = MPCType([l,sn],MPCScenarios,t,LastIteration,sampleID,interface_price,
+                    #                     true,final_p_in[l,sn,:])
+                    ImplementedSolution[sampleID][l,sn,t] = MPCType([l,sn],RealScenario[t:t],t,LastIteration,sampleID,interface_price,
+                                        true,final_p_in[l,sn,:])
                 end
-                # println("    Cost at ($l,$sn) : ", round(ImplementedSolution[l,sn,t].SubnetworkCost,digits=5))
-                # println("    Storage at ($l,$sn) : ", round(sum(ImplementedSolution[l,sn,t].storage)))
-                TotalStorage[t] += sum(ImplementedSolution[l,sn,t].storage)
-                TotalCost[t] += ImplementedSolution[l,sn,t].SubnetworkCost
-                TotalPS[t] += sum(ImplementedSolution[l,sn,t].productionshedding)
-                TotalLS[t] += sum(ImplementedSolution[l,sn,t].loadshedding)
+                # println("    Cost at ($l,$sn) : ", round(ImplementedSolution[sampleID][l,sn,t].SubnetworkCost,digits=5))
+                # println("    Storage at ($l,$sn) : ", round(sum(ImplementedSolution[sampleID][l,sn,t].storage)))
+                TotalStorage[t] += sum(ImplementedSolution[sampleID][l,sn,t].storage)
+                TotalCost[t] += ImplementedSolution[sampleID][l,sn,t].SubnetworkCost
+                TotalProductionShedding[t] += sum(ImplementedSolution[sampleID][l,sn,t].productionshedding)
+                TotalLoadShedding[t] += sum(ImplementedSolution[sampleID][l,sn,t].loadshedding)
            end
         end
         OnlineTime[t] = time() - s_time
         println("Total cost over the network (\$): ",round(TotalCost[t],digits=5))
         println("Total production over the network (kW): ",round(TotalProduction[t],digits=5))
         println("Total storage over the network (kWh): ",round(TotalStorage[t],digits=5))
-        println("Total load shedding over the network (kW): ",round(TotalLS[t],digits=5))
-        println("Total production shedding over the network (kW): ",round(TotalPS[t],digits=5))
+        println("Total load shedding over the network (kW): ",round(TotalLoadShedding[t],digits=5))
+        println("Total production shedding over the network (kW): ",round(TotalProductionShedding[t],digits=5))
         println("Computation time (s): ",round(OnlineTime[t],digits=2))
         println("===============================")
+        [TemporalSolutionSet[l,sn,k] = nothing for l =  1:NLayers, sn = 1:NSubnetworks[NLayers], k = 1:K+1]; # reset the set
     end
     # println("Total cost: ",round(sum(TotalCost)),", at each stage: ", TotalCost)
-    # println("===============================\n\n")
-    return MPCResultStruct(TotalCost,TotalProduction,TotalStorage,TotalLS,OnlineTime,ImplementedSolution) #TotalCost, TotalProduction, TotalStorage, OnlineTime
+    return MPCResultStruct(TotalCost,TotalProduction,TotalStorage,TotalLoadShedding,OnlineTime,IterationCount,ImplementedSolution[sampleID]) #TotalCost, TotalProduction, TotalStorage, OnlineTime
 end
 
 # function SAMPCSubproblem(NetworkID, MPCScenarios, TimeChoice, Iteration, dual_pi = zeros(T), LastIteration=false, Last_p_in = Any, Last_lambda = Any)
