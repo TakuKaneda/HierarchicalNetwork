@@ -5,5 +5,5 @@ deps/deps.jl
 draft.jl
 *.csv
 trial_solution/
-trial/N50_PF_result.jld2
+trial/
 proto.jl
