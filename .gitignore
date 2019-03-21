@@ -1,9 +1,0 @@
-*.jl.cov
-*.jl.*.cov
-*.jl.mem
-deps/deps.jl
-draft.jl
-*.csv
-trial_solution/
-trial/
-proto.jl
